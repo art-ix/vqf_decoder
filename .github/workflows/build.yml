@@ -1,0 +1,19 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  decoder:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build TwinVQ library and CLI
+        run: |
+          msbuild twinvq\twinvq.vcxproj /p:Configuration=Release /p:Platform=x64 /m /nologo
+          msbuild tools\vqf_decode.vcxproj /p:Configuration=Release /p:Platform=x64 /m /nologo
+      - name: Parse sample and test tags
+        run: |
+          .\bin\x64\Release\vqf_decode.exe --test-tags audio\koshuks-40kb.vqf
