@@ -98,12 +98,23 @@ msbuild tools\vqf_decode.vcxproj /p:Configuration=Release /p:Platform=x64
 
 ## Install the foobar2000 component
 
-1. Copy `foo_input_vqf.dll` to:
+Copy `foo_input_vqf.dll` into the foobar2000 **components** folder, then restart foobar2000.
 
-   `%APPDATA%\foobar2000-v2\user-components-x64\foo_input_vqf\foo_input_vqf.dll`
+The main install location is:
 
-2. Restart foobar2000.
-3. Check **File → Preferences → Components** for “TwinVQ decoder”.
+```
+C:\Program Files\foobar2000\components\foo_input_vqf.dll
+```
+
+If foobar2000 is installed somewhere else, use that install’s `components` directory (next to `foobar2000.exe`).
+
+A per-user copy also works:
+
+```
+%APPDATA%\foobar2000-v2\user-components-x64\foo_input_vqf\foo_input_vqf.dll
+```
+
+Check **File → Preferences → Components** for “TwinVQ decoder”.
 
 ## Command line
 
