@@ -109,8 +109,14 @@ msbuild tools\vqf_decode.vcxproj /p:Configuration=Release /p:Platform=x64
 
 ```bat
 bin\x64\Release\vqf_decode.exe audio\koshuks-40kb.vqf out.wav
+bin\x64\Release\vqf_decode.exe --test-imdct
 bin\x64\Release\vqf_decode.exe --test-tags audio\koshuks-40kb.vqf
+bin\x64\Release\vqf_decode.exe --test-seek audio\koshuks-40kb.vqf
 ```
+
+The CLI writes 16-bit PCM WAV in blocks, keeping memory use independent of track length.
+`decode_write_time` includes decoding and writing the WAV. Output must be a seekable file,
+and its size must fit the standard RIFF/WAV limit (approximately 4 GiB).
 
 ## Sample files
 

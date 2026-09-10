@@ -104,11 +104,6 @@ float get_cos(int idx, int part, const float* cos_tab, int size) {
     return part ? -cos_tab[size - idx - 1] : cos_tab[idx];
 }
 
-void memset_float(float* buf, float val, int size) {
-    for (int i = 0; i < size; i++)
-        buf[i] = val;
-}
-
 } // namespace
 
 Decoder::Decoder(const VqfInfo& info) {
@@ -127,8 +122,6 @@ Decoder::Decoder(const VqfInfo& info) {
     curr_frame_.assign(table_size, 0.0f);
     prev_frame_.assign(table_size, 0.0f);
     tmp_buf_.assign(std::max<int>(mtab_->size, 4096), 0.0f);
-    ch0_.assign(mtab_->size, 0.0f);
-    ch1_.assign(mtab_->size, 0.0f);
 
     for (int i = 0; i < 3; i++) {
         const int m = 4 * mtab_->size / mtab_->fmode[i].sub;
@@ -245,11 +238,9 @@ void Decoder::construct_perm_table(FrameType ftype) {
         for (int j = 0; j < line_len[i >= length_div]; j++)
             trans[cont++] = tmp[j * num_vect + i];
 
-    const int n_blocks = size;
     const int total = size * block_size;
-    block_size = total / n_blocks;
     for (int i = 0; i < total; i++)
-        permut_[fi][i] = static_cast<int16_t>(block_size * (trans[i] % n_blocks) + trans[i] / n_blocks);
+        permut_[fi][i] = static_cast<int16_t>(block_size * (trans[i] % num_blocks) + trans[i] / num_blocks);
 }
 
 void Decoder::dequant(const uint8_t* cb_bits, float* out, FrameType ftype,
@@ -312,7 +303,7 @@ void Decoder::dec_bark_env(const uint8_t* in, int use_hist, int ch, float* out, 
             hist[idx] = tmp2;
             if (st < -1.0f)
                 st = 1.0f;
-            memset_float(out, st * gain, mtab_->fmode[fi].bark_tab[idx]);
+            std::fill_n(out, mtab_->fmode[fi].bark_tab[idx], st * gain);
             out += mtab_->fmode[fi].bark_tab[idx];
         }
     }
@@ -367,13 +358,13 @@ void Decoder::dec_lpc_spectrum_inv(float* lsp, FrameType ftype, float* lpc) {
         eval_lpcenv_or_interp(ftype, lpc, lsp, size / 2, 8, 0);
         eval_lpcenv_or_interp(ftype, lpc + size / 2, lsp, size / 2, 16, 1);
         interpolate(lpc + size / 2 - 8 + 1, lpc[size / 2], lpc[size / 2 - 8], 8);
-        memset_float(lpc + size - 16 + 1, lpc[size - 16], 15);
+        std::fill_n(lpc + size - 16 + 1, 15, lpc[size - 16]);
         break;
     case FrameType::Medium:
         eval_lpcenv_or_interp(ftype, lpc, lsp, size / 2, 2, 0);
         eval_lpcenv_or_interp(ftype, lpc + size / 2, lsp, size / 2, 4, 1);
         interpolate(lpc + size / 2 - 2 + 1, lpc[size / 2], lpc[size / 2 - 2], 2);
-        memset_float(lpc + size - 4 + 1, lpc[size - 4], 3);
+        std::fill_n(lpc + size - 4 + 1, 3, lpc[size - 4]);
         break;
     case FrameType::Short: {
         const int size_s = mtab_->size / mtab_->fmode[0].sub;
@@ -548,19 +539,21 @@ void Decoder::imdct_output(FrameType ftype, int wtype, float* interleaved) {
 
     const int size2 = last_block_pos_[0];
     const int size1 = mtab_->size - size2;
-    std::memcpy(ch0_.data(), prev_buf, size1 * sizeof(float));
-    std::memcpy(ch0_.data() + size1, curr_frame_.data(), size2 * sizeof(float));
-    if (channels_ == 2) {
-        std::memcpy(ch1_.data(), prev_buf + 2 * mtab_->size, size1 * sizeof(float));
-        std::memcpy(ch1_.data() + size1, curr_frame_.data() + 2 * mtab_->size, size2 * sizeof(float));
-        butterflies(ch0_.data(), ch1_.data(), mtab_->size);
-        for (int i = 0; i < mtab_->size; i++) {
-            interleaved[i * 2] = ch0_[static_cast<size_t>(i)];
-            interleaved[i * 2 + 1] = ch1_[static_cast<size_t>(i)];
+    // Join the previous/current segments directly in the output, converting
+    // mid/side to interleaved left/right for stereo.
+    auto emit_segment = [&](const float* mid, float* dst, int count) {
+        if (channels_ == 2) {
+            const float* side = mid + 2 * mtab_->size;
+            for (int i = 0; i < count; i++) {
+                dst[i * 2] = mid[i] + side[i];
+                dst[i * 2 + 1] = mid[i] - side[i];
+            }
+        } else {
+            std::memcpy(dst, mid, count * sizeof(float));
         }
-    } else {
-        std::memcpy(interleaved, ch0_.data(), mtab_->size * sizeof(float));
-    }
+    };
+    emit_segment(prev_buf, interleaved, size1);
+    emit_segment(curr_frame_.data(), interleaved + size1 * channels_, size2);
 }
 
 int Decoder::decode_packet(const uint8_t* packet, int packet_size, float* out) {

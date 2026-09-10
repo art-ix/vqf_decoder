@@ -246,13 +246,4 @@ void vector_fmul_window(float* dst, const float* src0, const float* src1, const 
     }
 }
 
-void butterflies(float* left, float* right, int len) {
-    for (int i = 0; i < len; i++) {
-        const float a = left[i];
-        const float b = right[i];
-        left[i] = a + b;
-        right[i] = a - b;
-    }
-}
-
 } // namespace twinvq

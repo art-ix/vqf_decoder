@@ -12,8 +12,15 @@ jobs:
       - uses: microsoft/setup-msbuild@v2
       - name: Build TwinVQ library and CLI
         run: |
-          msbuild twinvq\twinvq.vcxproj /p:Configuration=Release /p:Platform=x64 /m /nologo
           msbuild tools\vqf_decode.vcxproj /p:Configuration=Release /p:Platform=x64 /m /nologo
-      - name: Parse sample and test tags
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test IMDCT, tags and seeking
         run: |
-          .\bin\x64\Release\vqf_decode.exe --test-tags audio\koshuks-40kb.vqf
+          .\bin\x64\Release\vqf_decode.exe --test-imdct
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($sample in @('audio\koshuks-40kb.vqf', 'audio\koshuks-96kb.vqf')) {
+            .\bin\x64\Release\vqf_decode.exe --test-tags $sample
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            .\bin\x64\Release\vqf_decode.exe --test-seek $sample
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }

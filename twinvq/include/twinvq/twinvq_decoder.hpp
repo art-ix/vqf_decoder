@@ -17,8 +17,8 @@ public:
 
     void reset();
 
-    // Consume one compressed frame from `br` (already positioned at frame bits,
-    // including the VQF leftover-byte prefix described by read_frame_packet).
+    // Consume one compressed frame from `packet`, including the skip count
+    // and leftover-byte prefix written by Packetizer::build().
     // Returns number of interleaved PCM frames written to `out` (0 while priming
     // or on failure). `out` must hold channels * frame_samples floats.
     int decode_packet(const uint8_t* packet, int packet_size, float* out);
@@ -71,8 +71,6 @@ private:
     std::vector<float> curr_frame_;
     std::vector<float> prev_frame_;
     std::vector<float> tmp_buf_;
-    std::vector<float> ch0_;
-    std::vector<float> ch1_;
     std::vector<float> cos_tabs_[3];
     int last_block_pos_[2]{};
     int discarded_ = 0;

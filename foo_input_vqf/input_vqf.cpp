@@ -9,6 +9,25 @@
 
 namespace {
 
+struct MetaField {
+    const char* name;
+    std::string twinvq::VqfInfo::*info;
+    std::string twinvq::VqfTags::*tags;
+};
+
+constexpr MetaField kMetaFields[] = {
+    {"title", &twinvq::VqfInfo::title, &twinvq::VqfTags::title},
+    {"artist", &twinvq::VqfInfo::artist, &twinvq::VqfTags::artist},
+    {"comment", &twinvq::VqfInfo::comment, &twinvq::VqfTags::comment},
+    {"copyright", &twinvq::VqfInfo::copyright, &twinvq::VqfTags::copyright},
+    {"album", &twinvq::VqfInfo::album, &twinvq::VqfTags::album},
+    {"genre", &twinvq::VqfInfo::genre, &twinvq::VqfTags::genre},
+    {"tracknumber", &twinvq::VqfInfo::track, &twinvq::VqfTags::track},
+    {"date", &twinvq::VqfInfo::year, &twinvq::VqfTags::year},
+    {"composer", &twinvq::VqfInfo::composer, &twinvq::VqfTags::composer},
+    {"publisher", &twinvq::VqfInfo::publisher, &twinvq::VqfTags::publisher},
+};
+
 bool parse_from_file(service_ptr_t<file>& f, twinvq::VqfInfo& info, abort_callback& abort, std::string& err) {
     auto read = [&](void* dst, size_t n) -> size_t {
         return f->read(dst, n, abort);
@@ -26,8 +45,7 @@ public:
         std::string err;
         if (!parse_from_file(m_file, m_info, p_abort, err))
             throw exception_io_unsupported_format();
-        m_decoder = std::make_unique<twinvq::Decoder>(m_info);
-        m_pkt.frame_bits = m_info.frame_bits;
+        m_decoder.reset();
     }
 
     void get_info(file_info& p_info, abort_callback&) {
@@ -38,26 +56,11 @@ public:
         p_info.info_set("encoding", "lossy");
         p_info.info_set("codec", "TwinVQ");
         p_info.info_set_bitrate(m_info.bitrate_kbps);
-        if (!m_info.title.empty())
-            p_info.meta_set("title", m_info.title.c_str());
-        if (!m_info.artist.empty())
-            p_info.meta_set("artist", m_info.artist.c_str());
-        if (!m_info.comment.empty())
-            p_info.meta_set("comment", m_info.comment.c_str());
-        if (!m_info.copyright.empty())
-            p_info.meta_set("copyright", m_info.copyright.c_str());
-        if (!m_info.album.empty())
-            p_info.meta_set("album", m_info.album.c_str());
-        if (!m_info.genre.empty())
-            p_info.meta_set("genre", m_info.genre.c_str());
-        if (!m_info.track.empty())
-            p_info.meta_set("tracknumber", m_info.track.c_str());
-        if (!m_info.year.empty())
-            p_info.meta_set("date", m_info.year.c_str());
-        if (!m_info.composer.empty())
-            p_info.meta_set("composer", m_info.composer.c_str());
-        if (!m_info.publisher.empty())
-            p_info.meta_set("publisher", m_info.publisher.c_str());
+        for (const auto& field : kMetaFields) {
+            const auto& text = m_info.*field.info;
+            if (!text.empty())
+                p_info.meta_set(field.name, text.c_str());
+        }
     }
 
     t_filestats2 get_stats2(unsigned f, abort_callback& a) { return m_file->get_stats2_(f, a); }
@@ -65,14 +68,15 @@ public:
 
     void decode_initialize(unsigned, abort_callback& p_abort) {
         m_file->seek(m_info.data_offset, p_abort);
-        m_decoder->reset();
+        if (!m_decoder)
+            m_decoder = std::make_unique<twinvq::Decoder>(m_info);
+        else
+            m_decoder->reset();
         m_pkt = twinvq::Packetizer{};
         m_pkt.frame_bits = m_info.frame_bits;
         m_eof = false;
-        m_priming = true;
         const size_t frame = static_cast<size_t>(m_info.channels) * m_info.frame_samples;
         m_pcm.resize(frame);
-        m_conv.resize(frame);
     }
 
     bool decode_run(audio_chunk& p_chunk, abort_callback& p_abort) {
@@ -90,10 +94,7 @@ public:
             const int psz = m_pkt.build(m_filebuf.data(), m_packet.data());
             const int samples = m_decoder->decode_packet(m_packet.data(), psz, m_pcm.data());
             if (samples > 0) {
-                const t_size n = static_cast<t_size>(samples) * m_info.channels;
-                for (t_size i = 0; i < n; i++)
-                    m_conv[i] = static_cast<audio_sample>(m_pcm[i]);
-                p_chunk.set_data(m_conv.data(), samples, m_info.channels, m_info.sample_rate);
+                p_chunk.set_data_32(m_pcm.data(), samples, m_info.channels, m_info.sample_rate);
                 return true;
             }
         }
@@ -123,18 +124,10 @@ public:
 
     void retag(const file_info& p_info, abort_callback& p_abort) {
         twinvq::VqfTags tags;
-        tags.title = meta0(p_info, "title");
-        tags.artist = meta0(p_info, "artist");
-        tags.comment = meta0(p_info, "comment");
-        tags.copyright = meta0(p_info, "copyright");
-        tags.album = meta0(p_info, "album");
-        tags.genre = meta0(p_info, "genre");
-        tags.track = meta0(p_info, "tracknumber");
-        tags.year = meta0(p_info, "date");
+        for (const auto& field : kMetaFields)
+            tags.*field.tags = meta0(p_info, field.name);
         if (tags.year.empty())
             tags.year = meta0(p_info, "year");
-        tags.composer = meta0(p_info, "composer");
-        tags.publisher = meta0(p_info, "publisher");
         rewrite_tags(tags, false, p_abort);
     }
 
@@ -196,9 +189,7 @@ private:
     twinvq::Packetizer m_pkt;
     std::vector<uint8_t> m_filebuf, m_packet;
     std::vector<float> m_pcm;
-    std::vector<audio_sample> m_conv;
     bool m_eof = false;
-    bool m_priming = false;
 };
 
 static input_singletrack_factory_t<input_vqf> g_input_vqf_factory;

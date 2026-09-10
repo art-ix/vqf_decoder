@@ -16,6 +16,4 @@ void vector_fmul(float* dst, const float* src0, const float* src1, int len);
 
 void vector_fmul_window(float* dst, const float* src0, const float* src1, const float* win, int len);
 
-void butterflies(float* left, float* right, int len);
-
 } // namespace twinvq

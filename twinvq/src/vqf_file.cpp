@@ -32,10 +32,31 @@ bool id_eq(const char id[4], const char* s) {
     return std::memcmp(id, s, 4) == 0;
 }
 
-bool is_tag_chunk(const char id[4]) {
-    return id_eq(id, "NAME") || id_eq(id, "AUTH") || id_eq(id, "COMT") || id_eq(id, "(c) ") ||
-           id_eq(id, "ALBM") || id_eq(id, "GENR") || id_eq(id, "TRCK") || id_eq(id, "TRAC") ||
-           id_eq(id, "YEAR") || id_eq(id, "MUSC") || id_eq(id, "LABL");
+struct TagField {
+    const char* id;
+    std::string VqfInfo::*info;
+    std::string VqfTags::*tags;
+};
+
+constexpr TagField kTagFields[] = {
+    {"NAME", &VqfInfo::title, &VqfTags::title},
+    {"AUTH", &VqfInfo::artist, &VqfTags::artist},
+    {"COMT", &VqfInfo::comment, &VqfTags::comment},
+    {"(c) ", &VqfInfo::copyright, &VqfTags::copyright},
+    {"ALBM", &VqfInfo::album, &VqfTags::album},
+    {"GENR", &VqfInfo::genre, &VqfTags::genre},
+    {"TRCK", &VqfInfo::track, &VqfTags::track},
+    {"YEAR", &VqfInfo::year, &VqfTags::year},
+    {"MUSC", &VqfInfo::composer, &VqfTags::composer},
+    {"LABL", &VqfInfo::publisher, &VqfTags::publisher},
+};
+
+const TagField* find_tag_field(const char id[4]) {
+    const char* canonical_id = id_eq(id, "TRAC") ? "TRCK" : id;
+    for (const auto& field : kTagFields)
+        if (id_eq(canonical_id, field.id))
+            return &field;
+    return nullptr;
 }
 
 std::string payload_text(const std::vector<uint8_t>& p) {
@@ -43,53 +64,36 @@ std::string payload_text(const std::vector<uint8_t>& p) {
 }
 
 void apply_chunk_meta(VqfInfo& info, const VqfChunk& c) {
-    if (id_eq(c.id, "NAME"))
-        info.title = payload_text(c.payload);
-    else if (id_eq(c.id, "AUTH"))
-        info.artist = payload_text(c.payload);
-    else if (id_eq(c.id, "COMT"))
-        info.comment = payload_text(c.payload);
-    else if (id_eq(c.id, "(c) "))
-        info.copyright = payload_text(c.payload);
-    else if (id_eq(c.id, "ALBM"))
-        info.album = payload_text(c.payload);
-    else if (id_eq(c.id, "GENR"))
-        info.genre = payload_text(c.payload);
-    else if (id_eq(c.id, "MUSC"))
-        info.composer = payload_text(c.payload);
-    else if (id_eq(c.id, "LABL"))
-        info.publisher = payload_text(c.payload);
-    else if (id_eq(c.id, "TRCK") || id_eq(c.id, "TRAC")) {
-        if (c.payload.size() == 2) {
-            const int t = (c.payload[0] << 8) | c.payload[1];
-            info.track = std::to_string(t);
-        } else {
-            info.track = payload_text(c.payload);
-        }
-    } else if (id_eq(c.id, "YEAR") && c.payload.size() >= 2) {
+    const auto* field = find_tag_field(c.id);
+    if (!field)
+        return;
+    auto& text = info.*field->info;
+    if (field->info == &VqfInfo::track && c.payload.size() == 2) {
+        const int t = (c.payload[0] << 8) | c.payload[1];
+        text = std::to_string(t);
+    } else if (field->info == &VqfInfo::year && c.payload.size() >= 2) {
         const int y = (c.payload[0] << 8) | c.payload[1];
         if (y > 0 && y < 3000 && c.payload.size() <= 4)
-            info.year = std::to_string(y);
+            text = std::to_string(y);
         else
-            info.year = payload_text(c.payload);
-    } else if (id_eq(c.id, "YEAR")) {
-        info.year = payload_text(c.payload);
+            text = payload_text(c.payload);
+    } else {
+        text = payload_text(c.payload);
     }
 }
 
 void refresh_meta(VqfInfo& info) {
-    info.title.clear();
-    info.artist.clear();
-    info.comment.clear();
-    info.copyright.clear();
-    info.album.clear();
-    info.genre.clear();
-    info.track.clear();
-    info.year.clear();
-    info.composer.clear();
-    info.publisher.clear();
+    for (const auto& field : kTagFields)
+        (info.*field.info).clear();
     for (const auto& c : info.chunks)
         apply_chunk_meta(info, c);
+}
+
+size_t header_byte_size(const VqfInfo& info) {
+    size_t size = 20; // TWIN + version + size + DATA marker.
+    for (const auto& c : info.chunks)
+        size += 8 + c.payload.size();
+    return size;
 }
 
 VqfChunk make_text_chunk(const char* id, const std::string& text) {
@@ -322,19 +326,16 @@ bool parse_vqf_header(const ReadFn& read, VqfInfo& info, std::string& error) {
 }
 
 std::vector<uint8_t> serialize_vqf_header(const VqfInfo& info) {
-    uint32_t chunks_size = 0;
-    for (const auto& c : info.chunks)
-        chunks_size += 8 + static_cast<uint32_t>(c.payload.size());
-
+    const size_t header_size = header_byte_size(info);
     std::vector<uint8_t> out;
-    out.reserve(16 + chunks_size + 4);
+    out.reserve(header_size);
     out.insert(out.end(), {'T', 'W', 'I', 'N'});
     std::string ver = info.version.empty() ? std::string("97012000") : info.version;
     if (ver.size() < 8)
         ver.append(8 - ver.size(), '0');
     out.insert(out.end(), ver.begin(), ver.begin() + 8);
     uint8_t sz[4];
-    wr_be32(sz, chunks_size);
+    wr_be32(sz, static_cast<uint32_t>(header_size - 20));
     out.insert(out.end(), sz, sz + 4);
     for (const auto& c : info.chunks) {
         out.insert(out.end(), c.id, c.id + 4);
@@ -354,7 +355,7 @@ void apply_tags(VqfInfo& info, const VqfTags& tags, bool strip_all) {
         if (id_eq(c.id, "COMM")) {
             comm = c;
             have_comm = true;
-        } else if (id_eq(c.id, "DSIZ") || is_tag_chunk(c.id)) {
+        } else if (id_eq(c.id, "DSIZ") || find_tag_field(c.id)) {
             continue;
         } else {
             extra.push_back(c);
@@ -365,28 +366,18 @@ void apply_tags(VqfInfo& info, const VqfTags& tags, bool strip_all) {
     if (have_comm)
         info.chunks.push_back(std::move(comm));
 
-    auto add = [&](const char* id, const std::string& text) {
-        if (!text.empty())
-            info.chunks.push_back(make_text_chunk(id, text));
-    };
     if (!strip_all) {
-        add("NAME", tags.title);
-        add("AUTH", tags.artist);
-        add("COMT", tags.comment);
-        add("(c) ", tags.copyright);
-        add("ALBM", tags.album);
-        add("GENR", tags.genre);
-        add("TRCK", tags.track);
-        add("YEAR", tags.year);
-        add("MUSC", tags.composer);
-        add("LABL", tags.publisher);
+        for (const auto& field : kTagFields) {
+            const auto& text = tags.*field.tags;
+            if (!text.empty())
+                info.chunks.push_back(make_text_chunk(field.id, text));
+        }
     }
 
     info.chunks.insert(info.chunks.end(), extra.begin(), extra.end());
     info.chunks.push_back(make_dsiz(static_cast<uint32_t>(info.data_size)));
     refresh_meta(info);
-    const auto hdr = serialize_vqf_header(info);
-    info.data_offset = hdr.size();
+    info.data_offset = header_byte_size(info);
 }
 
 bool parse_vqf_header_mem(const uint8_t* data, size_t size, VqfInfo& info, std::string& error) {
