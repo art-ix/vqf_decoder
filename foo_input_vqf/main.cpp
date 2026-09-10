@@ -2,7 +2,7 @@
 
 DECLARE_COMPONENT_VERSION(
     "TwinVQ decoder",
-    "1.1",
+    "1.2",
     "Independent TwinVQ/VQF decoder for foobar2000.\n"
     "Copyright (c) 2026 vqf_decoder authors. MIT License.\n"
     "Co-authored by Grok 4.6 (xAI).\n"

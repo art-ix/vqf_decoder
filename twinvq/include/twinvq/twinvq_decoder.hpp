@@ -6,6 +6,9 @@
 
 namespace twinvq {
 
+// Compare FFT IMDCT against the direct cosine definition.
+bool imdct_self_test(float* max_abs_err = nullptr);
+
 class BitReader;
 
 class Decoder {
@@ -45,7 +48,6 @@ private:
     void imdct_output(FrameType ftype, int wtype, float* interleaved);
     void eval_lpcenv_or_interp(FrameType ftype, float* out, const float* in, int size, int step, int part);
     void read_cb_data(BitReader& br, uint8_t* dst, FrameType ftype);
-    const float* sine_for(int wsize) const;
 
     const ModeTab* mtab_ = nullptr;
     int channels_ = 0;
@@ -69,8 +71,9 @@ private:
     std::vector<float> curr_frame_;
     std::vector<float> prev_frame_;
     std::vector<float> tmp_buf_;
+    std::vector<float> ch0_;
+    std::vector<float> ch1_;
     std::vector<float> cos_tabs_[3];
-    std::vector<float> sine_win_;
     int last_block_pos_[2]{};
     int discarded_ = 0;
 

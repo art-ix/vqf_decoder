@@ -127,9 +127,8 @@ Decoder::Decoder(const VqfInfo& info) {
     curr_frame_.assign(table_size, 0.0f);
     prev_frame_.assign(table_size, 0.0f);
     tmp_buf_.assign(std::max<int>(mtab_->size, 4096), 0.0f);
-
-    const float norm = (channels_ == 1) ? 2.0f : 1.0f;
-    (void)norm;
+    ch0_.assign(mtab_->size, 0.0f);
+    ch1_.assign(mtab_->size, 0.0f);
 
     for (int i = 0; i < 3; i++) {
         const int m = 4 * mtab_->size / mtab_->fmode[i].sub;
@@ -140,12 +139,6 @@ Decoder::Decoder(const VqfInfo& info) {
         for (int j = 1; j < m / 8; j++)
             cos_tabs_[i][m / 4 - j] = cos_tabs_[i][j];
     }
-
-    sine_win_.assign(4096, 0.0f);
-    for (int n = 32; n <= 2048; n <<= 1)
-        sine_window(sine_win_.data() + n, n); // stored at offset n, length n — wasteful but simple
-    // Actually overlapping offsets collide. Allocate per size instead:
-    sine_win_.assign(2048 + 1024 + 512 + 256 + 128 + 64 + 32, 0.0f);
 
     init_bitstream_params();
     reset();
@@ -509,17 +502,6 @@ void Decoder::read_and_decode_spectrum(float* out, FrameType ftype) {
     }
 }
 
-const float* Decoder::sine_for(int wsize) const {
-    // generated on demand into a mutable cache would be nicer; use a thread-local static
-    static float cache[2048];
-    static int cached = 0;
-    if (cached != wsize) {
-        sine_window(cache, wsize);
-        cached = wsize;
-    }
-    return cache;
-}
-
 void Decoder::imdct_and_window(FrameType ftype, int wtype, float* in, float* prev, int ch) {
     const int fi = static_cast<int>(ftype);
     const int bsize = mtab_->size / mtab_->fmode[fi].sub;
@@ -546,7 +528,8 @@ void Decoder::imdct_and_window(FrameType ftype, int wtype, float* in, float* pre
             sub_wtype = 7;
         wsize = types_sizes[kWtypeToWsize[sub_wtype]];
         imdct_half(buf1 + bsize * j, in + bsize * j, bsize, scale);
-        vector_fmul_window(out2, prev_buf + (bsize - wsize) / 2, buf1 + bsize * j, sine_for(wsize), wsize / 2);
+        vector_fmul_window(out2, prev_buf + (bsize - wsize) / 2, buf1 + bsize * j, sine_window_cached(wsize),
+                           wsize / 2);
         out2 += wsize;
         std::memcpy(out2, buf1 + bsize * j + wsize / 2, (bsize - wsize / 2) * sizeof(float));
         out2 += (ftype == FrameType::Medium) ? (bsize - wsize) / 2 : bsize - wsize;
@@ -565,19 +548,18 @@ void Decoder::imdct_output(FrameType ftype, int wtype, float* interleaved) {
 
     const int size2 = last_block_pos_[0];
     const int size1 = mtab_->size - size2;
-    std::vector<float> ch0(mtab_->size), ch1(mtab_->size);
-    std::memcpy(ch0.data(), prev_buf, size1 * sizeof(float));
-    std::memcpy(ch0.data() + size1, curr_frame_.data(), size2 * sizeof(float));
+    std::memcpy(ch0_.data(), prev_buf, size1 * sizeof(float));
+    std::memcpy(ch0_.data() + size1, curr_frame_.data(), size2 * sizeof(float));
     if (channels_ == 2) {
-        std::memcpy(ch1.data(), prev_buf + 2 * mtab_->size, size1 * sizeof(float));
-        std::memcpy(ch1.data() + size1, curr_frame_.data() + 2 * mtab_->size, size2 * sizeof(float));
-        butterflies(ch0.data(), ch1.data(), mtab_->size);
+        std::memcpy(ch1_.data(), prev_buf + 2 * mtab_->size, size1 * sizeof(float));
+        std::memcpy(ch1_.data() + size1, curr_frame_.data() + 2 * mtab_->size, size2 * sizeof(float));
+        butterflies(ch0_.data(), ch1_.data(), mtab_->size);
         for (int i = 0; i < mtab_->size; i++) {
-            interleaved[i * 2] = ch0[i];
-            interleaved[i * 2 + 1] = ch1[i];
+            interleaved[i * 2] = ch0_[static_cast<size_t>(i)];
+            interleaved[i * 2 + 1] = ch1_[static_cast<size_t>(i)];
         }
     } else {
-        std::memcpy(interleaved, ch0.data(), mtab_->size * sizeof(float));
+        std::memcpy(interleaved, ch0_.data(), mtab_->size * sizeof(float));
     }
 }
 

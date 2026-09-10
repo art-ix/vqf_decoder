@@ -70,12 +70,14 @@ public:
         m_pkt.frame_bits = m_info.frame_bits;
         m_eof = false;
         m_priming = true;
+        const size_t frame = static_cast<size_t>(m_info.channels) * m_info.frame_samples;
+        m_pcm.resize(frame);
+        m_conv.resize(frame);
     }
 
     bool decode_run(audio_chunk& p_chunk, abort_callback& p_abort) {
         if (m_eof)
             return false;
-        std::vector<float> pcm(static_cast<size_t>(m_info.channels) * m_info.frame_samples);
         for (;;) {
             const int nread = m_pkt.bytes_to_read();
             m_filebuf.resize(static_cast<size_t>(nread));
@@ -86,13 +88,12 @@ public:
             }
             m_packet.resize(static_cast<size_t>(nread) + 2);
             const int psz = m_pkt.build(m_filebuf.data(), m_packet.data());
-            const int samples = m_decoder->decode_packet(m_packet.data(), psz, pcm.data());
+            const int samples = m_decoder->decode_packet(m_packet.data(), psz, m_pcm.data());
             if (samples > 0) {
-                pfc::array_t<audio_sample> conv;
-                conv.set_size(static_cast<t_size>(samples) * m_info.channels);
-                for (t_size i = 0; i < conv.get_size(); i++)
-                    conv[i] = static_cast<audio_sample>(pcm[i]);
-                p_chunk.set_data(conv.get_ptr(), samples, m_info.channels, m_info.sample_rate);
+                const t_size n = static_cast<t_size>(samples) * m_info.channels;
+                for (t_size i = 0; i < n; i++)
+                    m_conv[i] = static_cast<audio_sample>(m_pcm[i]);
+                p_chunk.set_data(m_conv.data(), samples, m_info.channels, m_info.sample_rate);
                 return true;
             }
         }
@@ -190,6 +191,8 @@ private:
     std::unique_ptr<twinvq::Decoder> m_decoder;
     twinvq::Packetizer m_pkt;
     std::vector<uint8_t> m_filebuf, m_packet;
+    std::vector<float> m_pcm;
+    std::vector<audio_sample> m_conv;
     bool m_eof = false;
     bool m_priming = false;
 };

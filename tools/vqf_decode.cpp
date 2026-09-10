@@ -1,6 +1,7 @@
 #include "twinvq/vqf_file.hpp"
 #include "twinvq/twinvq_decoder.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -105,6 +106,15 @@ static int test_tags(const std::string& path) {
 }
 
 int main(int argc, char** argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--test-imdct") {
+        float err = 0;
+        if (!twinvq::imdct_self_test(&err)) {
+            std::cerr << "imdct self-test failed, max abs err=" << err << "\n";
+            return 1;
+        }
+        std::cout << "imdct self-test ok, max abs err=" << err << "\n";
+        return 0;
+    }
     if (argc >= 2 && std::string(argv[1]) == "--test-tags") {
         if (argc < 3) {
             std::cerr << "usage: vqf_decode --test-tags <input.vqf>\n";
@@ -113,7 +123,7 @@ int main(int argc, char** argv) {
         return test_tags(argv[2]);
     }
     if (argc < 2) {
-        std::cerr << "usage: vqf_decode <input.vqf> [output.wav]\n";
+        std::cerr << "usage: vqf_decode [--test-imdct] [--test-tags] <input.vqf> [output.wav]\n";
         return 1;
     }
     const std::string in_path = argv[1];
@@ -151,12 +161,16 @@ int main(int argc, char** argv) {
     pkt.frame_bits = info.frame_bits;
 
     std::vector<float> pcm;
+    if (info.sample_rate > 0)
+        pcm.reserve(static_cast<size_t>(twinvq::duration_seconds(info) * info.sample_rate + 8192) *
+                    static_cast<size_t>(info.channels));
     std::vector<float> frame(static_cast<size_t>(info.channels) * info.frame_samples);
     std::vector<uint8_t> file_bytes(static_cast<size_t>(pkt.bytes_to_read()) + 16);
     std::vector<uint8_t> packet(file_bytes.size() + 2);
 
     double peak = 0;
     int frames_out = 0;
+    const auto t0 = std::chrono::steady_clock::now();
     for (;;) {
         const int nread = pkt.bytes_to_read();
         file_bytes.resize(static_cast<size_t>(nread));
@@ -173,8 +187,15 @@ int main(int argc, char** argv) {
                 peak = std::max(peak, std::fabs(static_cast<double>(frame[i])));
         }
     }
+    const auto t1 = std::chrono::steady_clock::now();
+    const double decode_s = std::chrono::duration<double>(t1 - t0).count();
+    const double audio_s = twinvq::duration_seconds(info);
 
     std::cout << "decoded     " << frames_out << " samples, peak=" << peak << "\n";
+    std::cout << "decode_time " << decode_s << " s";
+    if (decode_s > 0)
+        std::cout << " (" << (audio_s / decode_s) << "x realtime)";
+    std::cout << "\n";
     write_wav16(out_path, info.sample_rate, info.channels, pcm);
     std::cout << "wrote       " << out_path << "\n";
     return 0;
