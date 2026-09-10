@@ -4,6 +4,12 @@ Independent TwinVQ decoder for Windows. It plays NTT / Yamaha SoundVQ files (`.v
 
 The codec implementation does **not** use FFmpeg, `tvqdec.dll`, or the Yamaha SoundVQ SDK.
 
+**Grok 4.6** (xAI) is a co-author of this library.
+
+## Prebuilt binaries
+
+A Windows x64 zip with `foo_input_vqf.dll` and `vqf_decode.exe` is attached to each [GitHub Release](https://github.com/art-ix/vqf_decoder/releases).
+
 ## Features
 
 - Decode TwinVQ / VQF (the proprietary NTT bitstream, not MPEG-4 TwinVQ)
@@ -109,6 +115,11 @@ bin\x64\Release\vqf_decode.exe --test-tags audio\koshuks-40kb.vqf
 ## Sample files
 
 `audio/` contains public TwinVQ samples of *(Walk Among) Koshuks*, downloaded from <http://www.onlovestar.com/noise/vqf.htm>. See [audio/README.md](audio/README.md).
+
+## Authors
+
+- Artur Pełzak
+- Grok 4.6 (xAI) — co-author of the TwinVQ library, foobar2000 component, and tooling
 
 ## License
 

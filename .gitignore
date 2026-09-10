@@ -39,3 +39,6 @@ twinvq/tables/metasound_twinvq_data.h
 # Local notes
 PLAN.md
 *.log
+
+# Packed binaries (attach to GitHub Releases, do not commit)
+dist/
