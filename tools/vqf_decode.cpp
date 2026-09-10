@@ -105,6 +105,73 @@ static int test_tags(const std::string& path) {
     return 0;
 }
 
+static int test_seek_start(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "cannot open " << path << "\n";
+        return 1;
+    }
+    twinvq::VqfInfo info;
+    std::string err;
+    auto read = [&](void* dst, size_t n) -> size_t {
+        in.read(static_cast<char*>(dst), static_cast<std::streamsize>(n));
+        return static_cast<size_t>(in.gcount());
+    };
+    if (!twinvq::parse_vqf_header(read, info, err)) {
+        std::cerr << "parse: " << err << "\n";
+        return 1;
+    }
+
+    auto decode_n = [&](twinvq::Packetizer pkt, bool seek_to_zero, int want_frames, std::vector<float>& out) -> int {
+        in.clear();
+        const int64_t bit_pos = 0;
+        if (seek_to_zero)
+            pkt.seek_prep(bit_pos);
+        in.seekg(twinvq::Packetizer::file_offset_for_bit(bit_pos, info.data_offset), std::ios::beg);
+        twinvq::Decoder dec(info);
+        std::vector<float> frame(static_cast<size_t>(info.channels) * info.frame_samples);
+        std::vector<uint8_t> file_bytes;
+        std::vector<uint8_t> packet;
+        int got_frames = 0;
+        while (got_frames < want_frames) {
+            const int nread = pkt.bytes_to_read();
+            file_bytes.resize(static_cast<size_t>(nread));
+            in.read(reinterpret_cast<char*>(file_bytes.data()), nread);
+            if (in.gcount() < nread)
+                break;
+            packet.resize(static_cast<size_t>(nread) + 2);
+            const int psz = pkt.build(file_bytes.data(), packet.data());
+            const int got = dec.decode_packet(packet.data(), psz, frame.data());
+            if (got > 0) {
+                out.insert(out.end(), frame.begin(), frame.begin() + got * info.channels);
+                got_frames += got;
+            }
+        }
+        return got_frames;
+    };
+
+    twinvq::Packetizer fresh;
+    fresh.frame_bits = info.frame_bits;
+    std::vector<float> a, b;
+    const int n = decode_n(fresh, false, info.frame_samples * 4, a);
+    twinvq::Packetizer seeked;
+    seeked.frame_bits = info.frame_bits;
+    const int m = decode_n(seeked, true, info.frame_samples * 4, b);
+    if (n <= 0 || n != m || a.size() != b.size()) {
+        std::cerr << "seek-start length mismatch: " << n << " vs " << m << "\n";
+        return 1;
+    }
+    float worst = 0;
+    for (size_t i = 0; i < a.size(); i++)
+        worst = std::max(worst, std::fabs(a[i] - b[i]));
+    if (worst > 1.0e-6f) {
+        std::cerr << "seek-start pcm mismatch, max abs err=" << worst << "\n";
+        return 1;
+    }
+    std::cout << "seek-start ok, " << n << " samples compared, max abs err=" << worst << "\n";
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc >= 2 && std::string(argv[1]) == "--test-imdct") {
         float err = 0;
@@ -122,8 +189,15 @@ int main(int argc, char** argv) {
         }
         return test_tags(argv[2]);
     }
+    if (argc >= 2 && std::string(argv[1]) == "--test-seek") {
+        if (argc < 3) {
+            std::cerr << "usage: vqf_decode --test-seek <input.vqf>\n";
+            return 1;
+        }
+        return test_seek_start(argv[2]);
+    }
     if (argc < 2) {
-        std::cerr << "usage: vqf_decode [--test-imdct] [--test-tags] <input.vqf> [output.wav]\n";
+        std::cerr << "usage: vqf_decode [--test-imdct] [--test-tags] [--test-seek] <input.vqf> [output.wav]\n";
         return 1;
     }
     const std::string in_path = argv[1];

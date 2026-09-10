@@ -114,12 +114,24 @@ struct Packetizer {
     }
 
     void seek_prep(int64_t bit_pos) {
-        remaining_bits = static_cast<int>(-7 - ((bit_pos - 7) & 7));
         last_frame_bits = 0;
+        // Bit 0 has no previous leftover byte. The (pos-7) formula seeks one
+        // byte before DATA and skips it; if the offset is clamped to DATA
+        // start, remaining_bits=-8 skips the first audio byte and desyncs.
+        if (bit_pos <= 0) {
+            remaining_bits = 0;
+            return;
+        }
+        remaining_bits = static_cast<int>(-7 - ((bit_pos - 7) & 7));
     }
 
     static int64_t file_offset_for_bit(int64_t bit_pos, uint64_t data_offset) {
-        return static_cast<int64_t>(data_offset) + ((bit_pos - 7) >> 3);
+        if (bit_pos <= 0)
+            return static_cast<int64_t>(data_offset);
+        const int64_t rel = (bit_pos - 7) >> 3;
+        if (rel < 0)
+            return static_cast<int64_t>(data_offset);
+        return static_cast<int64_t>(data_offset) + rel;
     }
 };
 

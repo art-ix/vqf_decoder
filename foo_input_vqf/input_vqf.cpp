@@ -107,6 +107,10 @@ public:
         const t_uint64 max_frame = m_info.frame_bits ? (total_bits / m_info.frame_bits) : 0;
         if (frame > max_frame)
             frame = max_frame;
+        if (frame == 0) {
+            decode_initialize(0, p_abort);
+            return;
+        }
         const int64_t bit_pos = static_cast<int64_t>(frame * static_cast<t_uint64>(m_info.frame_bits));
         const int64_t off = twinvq::Packetizer::file_offset_for_bit(bit_pos, m_info.data_offset);
         m_file->seek(off < static_cast<int64_t>(m_info.data_offset) ? m_info.data_offset : off, p_abort);
